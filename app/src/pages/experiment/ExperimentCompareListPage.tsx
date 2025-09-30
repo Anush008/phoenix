@@ -1,11 +1,21 @@
-import { memo, useCallback, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  startTransition,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { graphql, useFragment, usePaginationFragment } from "react-relay";
 import { useLoaderData, useSearchParams } from "react-router";
 import {
   ColumnDef,
   flexRender,
   getCoreRowModel,
+  getSortedRowModel,
   Getter,
+  SortingState,
   Table,
   useReactTable,
 } from "@tanstack/react-table";
@@ -55,7 +65,12 @@ import type {
   ExperimentCompareListPage_comparisons$data,
   ExperimentCompareListPage_comparisons$key,
 } from "./__generated__/ExperimentCompareListPage_comparisons.graphql";
-import type { ExperimentCompareListPageQuery } from "./__generated__/ExperimentCompareListPageQuery.graphql";
+import type {
+  ExperimentCompareListPageQuery,
+  ExperimentRunMetric,
+  ExperimentRunSort,
+  SortDir,
+} from "./__generated__/ExperimentCompareListPageQuery.graphql";
 import type { experimentCompareLoader } from "./experimentCompareLoader";
 import { calculateAnnotationScorePercentile } from "./utils";
 
@@ -90,7 +105,8 @@ export function ExperimentCompareListPage() {
   const [selectedExampleId, setSelectedExampleId] = useState<string | null>(
     null
   );
-
+  const [sorting, setSorting] = useState<SortingState>([]);
+  const isFirstRender = useRef<boolean>(true);
   const { getExperimentColor, baseExperimentColor } = useExperimentColors();
 
   const tableContainerRef = useRef<HTMLDivElement>(null);
@@ -138,74 +154,77 @@ export function ExperimentCompareListPage() {
       `,
       loaderData
     );
-  const { data, loadNext, hasNext, isLoadingNext } = usePaginationFragment<
-    ExperimentCompareListPageQuery,
-    ExperimentCompareListPage_comparisons$key
-  >(
-    graphql`
-      fragment ExperimentCompareListPage_comparisons on Query
-      @refetchable(queryName: "ExperimentCompareListPageQuery")
-      @argumentDefinitions(
-        first: { type: "Int", defaultValue: 50 }
-        after: { type: "ID", defaultValue: null }
-        baseExperimentId: { type: "ID!" }
-        compareExperimentIds: { type: "[ID!]!" }
-      ) {
-        experiment: node(id: $baseExperimentId) {
-          ... on Experiment {
-            id
-            runs(first: $first, after: $after)
-              @connection(key: "ExperimentCompareListPage_runs") {
-              edges {
-                run: node {
-                  id
-                  output
-                  startTime
-                  endTime
-                  costSummary {
-                    total {
-                      tokens
-                      cost
-                    }
-                  }
-                  annotations {
-                    edges {
-                      annotation: node {
-                        name
-                        score
-                        label
-                        id
+  const { data, loadNext, hasNext, isLoadingNext, refetch } =
+    usePaginationFragment<
+      ExperimentCompareListPageQuery,
+      ExperimentCompareListPage_comparisons$key
+    >(
+      graphql`
+        fragment ExperimentCompareListPage_comparisons on Query
+        @refetchable(queryName: "ExperimentCompareListPageQuery")
+        @argumentDefinitions(
+          first: { type: "Int", defaultValue: 50 }
+          after: { type: "ID", defaultValue: null }
+          baseExperimentId: { type: "ID!" }
+          compareExperimentIds: { type: "[ID!]!" }
+          sort: { type: "ExperimentRunSort", defaultValue: null }
+        ) {
+          experiment: node(id: $baseExperimentId) {
+            ... on Experiment {
+              id
+              runs(first: $first, after: $after, sort: $sort)
+                @connection(key: "ExperimentCompareListPage_runs") {
+                edges {
+                  run: node {
+                    id
+                    output
+                    startTime
+                    endTime
+                    costSummary {
+                      total {
+                        tokens
+                        cost
                       }
                     }
-                  }
-                  example {
-                    id
-                    revision {
-                      input
-                      referenceOutput: output
-                    }
-                    experimentRepeatedRunGroups(
-                      experimentIds: $compareExperimentIds
-                    ) {
-                      experimentId
-                      runs {
-                        id
-                        output
-                        startTime
-                        endTime
-                        costSummary {
-                          total {
-                            tokens
-                            cost
-                          }
+                    annotations {
+                      edges {
+                        annotation: node {
+                          name
+                          score
+                          label
+                          id
                         }
-                        annotations {
-                          edges {
-                            annotation: node {
-                              name
-                              score
-                              label
-                              id
+                      }
+                    }
+                    example {
+                      id
+                      revision {
+                        input
+                        referenceOutput: output
+                      }
+                      experimentRepeatedRunGroups(
+                        experimentIds: $compareExperimentIds
+                      ) {
+                        experimentId
+                        runs {
+                          id
+                          output
+                          startTime
+                          endTime
+                          costSummary {
+                            total {
+                              tokens
+                              cost
+                            }
+                          }
+                          annotations {
+                            edges {
+                              annotation: node {
+                                name
+                                score
+                                label
+                                id
+                              }
                             }
                           }
                         }
@@ -217,10 +236,9 @@ export function ExperimentCompareListPage() {
             }
           }
         }
-      }
-    `,
-    loaderData
-  );
+      `,
+      loaderData
+    );
 
   const experiments = useMemo(() => {
     const experimentsById: Record<string, Experiment> = {};
@@ -566,6 +584,7 @@ export function ExperimentCompareListPage() {
         accessorKey: "latencyMs",
         minSize: 150,
         enableResizing: false,
+        enableSorting: true,
         cell: ({ getValue }) => {
           const latencyMs = getValue() as TableRow["latencyMs"];
           return (
@@ -837,9 +856,44 @@ export function ExperimentCompareListPage() {
   const table = useReactTable({
     data: tableData,
     columns,
+    state: {
+      sorting,
+    },
+    onSortingChange: setSorting,
     getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
     columnResizeMode: "onChange",
+    manualSorting: true,
   });
+
+  // Refetch data when sorting changes
+  useEffect(() => {
+    // Skip the first render. It's been loaded by the parent
+    if (isFirstRender.current === true) {
+      isFirstRender.current = false;
+      return;
+    }
+    let gqlSort: ExperimentRunSort | null = null;
+    if (sorting.length > 0) {
+      const sort = sorting[0];
+      const metric = sort.id as ExperimentRunMetric;
+      const dir: SortDir = sort.desc ? "desc" : "asc";
+      gqlSort = {
+        col: { metric },
+        dir,
+      };
+    }
+    startTransition(() => {
+      refetch(
+        {
+          after: null,
+          first: 50,
+          sort: gqlSort,
+        },
+        { fetchPolicy: "store-and-network" }
+      );
+    });
+  }, [sorting, refetch]);
 
   const rows = table.getRowModel().rows;
   const virtualizer = useVirtualizer({
@@ -907,10 +961,36 @@ export function ExperimentCompareListPage() {
                     >
                       {header.isPlaceholder ? null : (
                         <>
-                          {flexRender(
-                            header.column.columnDef.header,
-                            header.getContext()
-                          )}
+                          <div
+                            {...{
+                              className: header.column.getCanSort()
+                                ? "sort"
+                                : "",
+                              onClick: header.column.getToggleSortingHandler(),
+                              style: {
+                                cursor: header.column.getCanSort()
+                                  ? "pointer"
+                                  : "default",
+                              },
+                            }}
+                          >
+                            {flexRender(
+                              header.column.columnDef.header,
+                              header.getContext()
+                            )}
+                            {header.column.getIsSorted() && (
+                              <Icon
+                                className="sort-icon"
+                                svg={
+                                  header.column.getIsSorted() === "asc" ? (
+                                    <Icons.ArrowUpFilled />
+                                  ) : (
+                                    <Icons.ArrowDownFilled />
+                                  )
+                                }
+                              />
+                            )}
+                          </div>
                           {header.column.getCanResize() && (
                             <div
                               {...{

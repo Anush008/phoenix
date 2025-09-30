@@ -1,5 +1,5 @@
 /**
- * @generated SignedSource<<a9328b7987d49cef7b0640ec6284092d>>
+ * @generated SignedSource<<282c334fca17bbd327b287ca4a8f9a75>>
  * @lightSyntaxTransform
  * @nogrep
  */
@@ -1103,7 +1103,9 @@ return {
                   {
                     "alias": null,
                     "args": (v43/*: any*/),
-                    "filters": null,
+                    "filters": [
+                      "sort"
+                    ],
                     "handle": "connection",
                     "key": "ExperimentCompareListPage_runs",
                     "kind": "LinkedHandle",

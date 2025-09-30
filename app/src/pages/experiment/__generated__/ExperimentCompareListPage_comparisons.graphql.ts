@@ -1,5 +1,5 @@
 /**
- * @generated SignedSource<<b93b0f13a4b9b8f59975c30486571679>>
+ * @generated SignedSource<<8d60876d3d80f4781ec9af2197e3b719>>
  * @lightSyntaxTransform
  * @nogrep
  */
@@ -226,6 +226,11 @@ return {
       "defaultValue": 50,
       "kind": "LocalArgument",
       "name": "first"
+    },
+    {
+      "defaultValue": null,
+      "kind": "LocalArgument",
+      "name": "sort"
     }
   ],
   "kind": "Fragment",
@@ -273,7 +278,13 @@ return {
             (v1/*: any*/),
             {
               "alias": "runs",
-              "args": null,
+              "args": [
+                {
+                  "kind": "Variable",
+                  "name": "sort",
+                  "variableName": "sort"
+                }
+              ],
               "concreteType": "ExperimentRunConnection",
               "kind": "LinkedField",
               "name": "__ExperimentCompareListPage_runs_connection",
@@ -451,6 +462,6 @@ return {
 };
 })();
 
-(node as any).hash = "3df07a794fecdbf8e78fc2a509bbb67a";
+(node as any).hash = "d8f5194811cdfdbadba681b462ed59b7";
 
 export default node;
